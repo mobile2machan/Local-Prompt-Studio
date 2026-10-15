@@ -27,12 +27,20 @@ from PySide6.QtWidgets import (
 )
 
 from app.theme import apply_application_theme
-from app.workers import ComfyUIPairThread, ComfyUITestThread
+from app.workers import (
+    ComfyUIPairThread,
+    ComfyUITestThread,
+    OpenAIConnectionTestThread,
+)
 from core.comfyui_bridge import (
     BridgeStatus,
     ComfyUIBridgeError,
     ComfyUIBridgeService,
     normalize_comfyui_base_url,
+)
+from core.comfyui_credentials import (
+    CredentialStoreError,
+    OpenAICompatibleCredentialStore,
 )
 from core.config_manager import (
     AppConfig,
@@ -41,6 +49,8 @@ from core.config_manager import (
     PROMPT_LIBRARY_DETAIL_LINES_RANGE,
     PROMPT_LIBRARY_RESULT_ROWS_RANGE,
     PROMPT_LIBRARY_TAG_ROWS_RANGE,
+    LLM_PROVIDER_LLAMA_CPP,
+    LLM_PROVIDER_OPENAI_COMPATIBLE,
     normalize_model_path_key,
 )
 from core.inference_backends import (
@@ -57,6 +67,7 @@ from core.localization import (
     Localization,
 )
 from core.model_manager import inspect_model
+from core.openai_compatible import OpenAICompatibleClient, normalize_openai_base_url
 from core.skill_manager import SkillError, SkillManager
 from core.system_memory import (
     assess_memory,
@@ -175,6 +186,19 @@ class SettingsDialog(QDialog):
         self.config_manager = config_manager
         self.project_root = project_root
         self.config = config_manager.load()
+        self.openai_credentials = OpenAICompatibleCredentialStore(
+            config_manager.data_dir
+        )
+        try:
+            self._saved_openai_url = normalize_openai_base_url(
+                self.config.openai_base_url
+            )
+            self._saved_openai_key = self.openai_credentials.load(
+                self._saved_openai_url
+            )
+        except (CredentialStoreError, ValueError):
+            self._saved_openai_url = ""
+            self._saved_openai_key = ""
         self.localization = localization or Localization(
             project_root / "locales", self.config.ui_locale
         )
@@ -188,12 +212,14 @@ class SettingsDialog(QDialog):
             )
         )
         self._test_worker: ComfyUITestThread | None = None
+        self._openai_test_worker: OpenAIConnectionTestThread | None = None
         self._pair_worker: ComfyUIPairThread | None = None
         self._pairing_dialog: PairingVerificationDialog | None = None
         self._test_result: BridgeStatus | None = None
         self._test_error_code: str | None = None
         self._pair_succeeded = False
         self._pair_error_code: str | None = None
+        self._openai_test_message: str | None = None
         self._close_requested = False
         self._close_completed = False
         self._application_quit_pending = False
@@ -231,13 +257,73 @@ class SettingsDialog(QDialog):
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         layout.addLayout(form)
 
+        self.llm_provider = QComboBox()
+        self.llm_provider.setObjectName("llm_provider")
+        self.llm_provider.addItem(
+            self.tr("settings.llm_provider.local"), LLM_PROVIDER_LLAMA_CPP
+        )
+        self.llm_provider.addItem(
+            self.tr("settings.llm_provider.openai"),
+            LLM_PROVIDER_OPENAI_COMPATIBLE,
+        )
+        provider_index = self.llm_provider.findData(self.config.llm_provider)
+        self.llm_provider.setCurrentIndex(max(0, provider_index))
+        form.addRow(self.tr("settings.llm_provider"), self.llm_provider)
+
+        self.openai_group = QGroupBox(self.tr("settings.openai.title"))
+        self.openai_group.setObjectName("openai_compatible_settings")
+        openai_form = QFormLayout(self.openai_group)
+        openai_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        openai_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        self.openai_base_url = QLineEdit(self.config.openai_base_url)
+        self.openai_base_url.setObjectName("openai_base_url")
+        self._configure_path_field(self.openai_base_url)
+        self.openai_base_url.setPlaceholderText(
+            self.tr("settings.openai.url_placeholder")
+        )
+        openai_form.addRow(self.tr("settings.openai.url"), self.openai_base_url)
+        self.openai_model = QLineEdit(self.config.openai_model)
+        self.openai_model.setObjectName("openai_model")
+        self._configure_path_field(self.openai_model)
+        openai_form.addRow(self.tr("settings.openai.model"), self.openai_model)
+        self.openai_api_key = QLineEdit(self._saved_openai_key)
+        self.openai_api_key.setObjectName("openai_api_key")
+        self.openai_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._configure_path_field(self.openai_api_key)
+        self.openai_api_key.setPlaceholderText(
+            self.tr("settings.openai.api_key_placeholder")
+        )
+        openai_form.addRow(self.tr("settings.openai.api_key"), self.openai_api_key)
+        self.openai_forget_key = QCheckBox(
+            self.tr("settings.openai.forget_key")
+        )
+        self.openai_forget_key.setObjectName("openai_forget_key")
+        openai_form.addRow("", self.openai_forget_key)
+        self.openai_test_button = QPushButton(self.tr("settings.openai.test"))
+        self.openai_test_button.setObjectName("openai_test_connection")
+        self.openai_test_button.clicked.connect(self._test_openai_connection)
+        openai_form.addRow("", self.openai_test_button)
+        self.openai_feedback = QLabel()
+        self.openai_feedback.setWordWrap(True)
+        openai_form.addRow("", self.openai_feedback)
+        self.openai_note = QLabel(self.tr("settings.openai.note"))
+        self.openai_note.setWordWrap(True)
+        openai_form.addRow("", self.openai_note)
+        form.addRow(self.openai_group)
+        self.openai_base_url.textChanged.connect(self._openai_endpoint_changed)
+        self.openai_forget_key.toggled.connect(
+            lambda checked: self.openai_api_key.clear() if checked else None
+        )
+
         self.model_path = QLineEdit(self.config.model_path)
         self._configure_path_field(self.model_path)
         model_row = QHBoxLayout()
         model_row.addWidget(self.model_path, 1)
-        browse_model = QPushButton(self.tr("settings.choose_gguf"))
-        browse_model.clicked.connect(self._choose_model)
-        model_row.addWidget(browse_model)
+        self.model_browse = QPushButton(self.tr("settings.choose_gguf"))
+        self.model_browse.clicked.connect(self._choose_model)
+        model_row.addWidget(self.model_browse)
         form.addRow(self.tr("settings.model_path"), model_row)
 
         self.model_info = QLabel()
@@ -481,6 +567,10 @@ class SettingsDialog(QDialog):
         self.buttons = buttons
         self._update_comfyui_paired_state()
         self._update_backend_controls()
+        self.llm_provider.currentIndexChanged.connect(
+            self._update_llm_provider_controls
+        )
+        self._update_llm_provider_controls()
         self._update_model_info()
         self._fit_to_available_geometry()
         if focus_chat_model:
@@ -490,6 +580,84 @@ class SettingsDialog(QDialog):
     def _configure_path_field(field: QLineEdit) -> None:
         field.setMinimumWidth(0)
         field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def _update_llm_provider_controls(self, *_args) -> None:
+        use_openai = self.llm_provider.currentData() == LLM_PROVIDER_OPENAI_COMPATIBLE
+        self.openai_group.setVisible(use_openai)
+        local_controls = (
+            self.model_path,
+            self.model_browse,
+            self.model_info,
+            self.backend,
+            self.backend_device,
+            self.backend_info,
+            self.cpu_threads,
+            self.gpu_layers,
+            self.context_size,
+            self.memory_info,
+            self.chat_model_group,
+        )
+        for control in local_controls:
+            control.setEnabled(not use_openai)
+        self._update_backend_controls()
+        self._update_memory_warning()
+
+    def _openai_endpoint_changed(self, _value: str) -> None:
+        try:
+            current_url = normalize_openai_base_url(self.openai_base_url.text())
+        except ValueError:
+            return
+        if current_url != self._saved_openai_url:
+            self.openai_api_key.clear()
+            self.openai_forget_key.setChecked(False)
+
+    def _test_openai_connection(self) -> None:
+        if self._openai_test_worker is not None or self._close_requested:
+            return
+        try:
+            base_url = normalize_openai_base_url(self.openai_base_url.text())
+            OpenAICompatibleClient(
+                base_url,
+                self.openai_model.text().strip() or "connection-test",
+                self.openai_api_key.text(),
+            )
+        except ValueError as exc:
+            self.openai_feedback.setText(str(exc))
+            return
+        self.openai_feedback.setText(self.tr("settings.openai.testing"))
+        self._openai_test_message = None
+        self.openai_test_button.setEnabled(False)
+        worker = OpenAIConnectionTestThread(
+            base_url,
+            self.openai_model.text().strip(),
+            self.openai_api_key.text(),
+            parent=self,
+        )
+        self._openai_test_worker = worker
+        worker.succeeded.connect(self._openai_connection_succeeded)
+        worker.failed.connect(self._openai_connection_failed)
+        worker.finished.connect(self._openai_connection_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _openai_connection_succeeded(self) -> None:
+        self._openai_test_message = self.tr("settings.openai.test_success")
+
+    def _openai_connection_failed(self, message: str) -> None:
+        self._openai_test_message = self.tr(
+            "settings.openai.test_failure", error=message
+        )
+
+    def _openai_connection_finished(self) -> None:
+        self._openai_test_worker = None
+        if self._close_requested:
+            self._finish_requested_close_if_idle()
+            return
+        self.openai_test_button.setEnabled(True)
+        if self._openai_test_message:
+            self.openai_feedback.setText(self._openai_test_message)
+        else:
+            self.openai_feedback.clear()
 
     def _target_screen(self):
         parent = self.parentWidget()
@@ -732,8 +900,11 @@ class SettingsDialog(QDialog):
             return
         self._close_requested = True
         self._set_comfyui_controls_enabled(False)
+        self.openai_test_button.setEnabled(False)
         if self._test_worker is not None:
             self._test_worker.requestInterruption()
+        if self._openai_test_worker is not None:
+            self._openai_test_worker.requestInterruption()
         if self._pair_worker is not None:
             self._pair_worker.cancel()
         if self._pairing_dialog is not None:
@@ -744,7 +915,11 @@ class SettingsDialog(QDialog):
         self._finish_requested_close_if_idle()
 
     def _finish_requested_close_if_idle(self) -> None:
-        if self._test_worker is not None or self._pair_worker is not None:
+        if (
+            self._test_worker is not None
+            or self._openai_test_worker is not None
+            or self._pair_worker is not None
+        ):
             return
         if self._pairing_dialog is not None:
             dialog = self._pairing_dialog
@@ -764,7 +939,11 @@ class SettingsDialog(QDialog):
         if (
             watched is self._application
             and event.type() == QEvent.Quit
-            and (self._test_worker is not None or self._pair_worker is not None)
+            and (
+                self._test_worker is not None
+                or self._openai_test_worker is not None
+                or self._pair_worker is not None
+            )
         ):
             self._application_quit_pending = True
             self._request_close_after_workers()
@@ -904,8 +1083,13 @@ class SettingsDialog(QDialog):
 
     def _update_backend_controls(self) -> None:
         is_vulkan = self.backend.currentData() == BACKEND_VULKAN
-        self.backend_device.setEnabled(is_vulkan and bool(self.vulkan_devices))
-        self.gpu_layers.setEnabled(is_vulkan)
+        local_provider = (
+            self.llm_provider.currentData() != LLM_PROVIDER_OPENAI_COMPATIBLE
+        )
+        self.backend_device.setEnabled(
+            local_provider and is_vulkan and bool(self.vulkan_devices)
+        )
+        self.gpu_layers.setEnabled(local_provider and is_vulkan)
         if not is_vulkan:
             suffix_key = ""
             if not self.runtime_manager.runtime_available(BACKEND_VULKAN):
@@ -991,6 +1175,13 @@ class SettingsDialog(QDialog):
 
     def _reset_fields(self) -> None:
         default = AppConfig()
+        self.llm_provider.setCurrentIndex(
+            self.llm_provider.findData(default.llm_provider)
+        )
+        self.openai_base_url.setText(default.openai_base_url)
+        self.openai_model.clear()
+        self.openai_api_key.clear()
+        self.openai_forget_key.setChecked(True)
         self.model_path.clear()
         self.backend.setCurrentIndex(self.backend.findData(default.inference_backend))
         self.cpu_threads.setValue(default.cpu_threads)
@@ -1015,7 +1206,11 @@ class SettingsDialog(QDialog):
         self._update_comfyui_paired_state()
 
     def accept(self) -> None:
-        if self._test_worker is not None or self._pair_worker is not None:
+        if (
+            self._test_worker is not None
+            or self._openai_test_worker is not None
+            or self._pair_worker is not None
+        ):
             return
         try:
             normalized_comfyui_url = self._normalized_entered_comfyui_url()
@@ -1036,6 +1231,29 @@ class SettingsDialog(QDialog):
                 self._show_bridge_error(self.tr("comfyui.pairing.title"), exc.code)
                 return
             self._paired_url = None
+        llm_provider = str(self.llm_provider.currentData())
+        try:
+            normalized_openai_url = normalize_openai_base_url(
+                self.openai_base_url.text()
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                self.tr("settings.openai.title"),
+                str(exc),
+            )
+            return
+        if (
+            llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+            and not self.openai_model.text().strip()
+        ):
+            QMessageBox.warning(
+                self,
+                self.tr("settings.openai.title"),
+                self.tr("settings.openai.model_required"),
+            )
+            return
+        api_key = self.openai_api_key.text().strip()
         config.model_path = self.model_path.text().strip()
         self._switch_mmproj_target()
         self._store_current_mmproj()
@@ -1065,6 +1283,9 @@ class SettingsDialog(QDialog):
             else DEFAULT_UI_LOCALE
         )
         config.comfyui_url = normalized_comfyui_url
+        config.llm_provider = llm_provider
+        config.openai_base_url = normalized_openai_url
+        config.openai_model = self.openai_model.text().strip()
         try:
             self.config_manager.save(config)
         except OSError:
@@ -1074,6 +1295,19 @@ class SettingsDialog(QDialog):
                 self.tr("error.portable_write"),
             )
             return
+        try:
+            if self.openai_forget_key.isChecked():
+                self.openai_credentials.delete()
+            elif api_key:
+                self.openai_credentials.save(normalized_openai_url, api_key)
+        except CredentialStoreError:
+            QMessageBox.warning(
+                self,
+                self.tr("settings.openai.title"),
+                self.tr("settings.openai.credential_failed"),
+            )
+            return
+        self._saved_openai_url = normalized_openai_url
         self._saved_comfyui_url = normalized_comfyui_url
         if self._application is not None:
             apply_application_theme(self._application, config.theme)
@@ -1086,13 +1320,21 @@ class SettingsDialog(QDialog):
         super().accept()
 
     def reject(self) -> None:
-        if self._test_worker is not None or self._pair_worker is not None:
+        if (
+            self._test_worker is not None
+            or self._openai_test_worker is not None
+            or self._pair_worker is not None
+        ):
             self._request_close_after_workers()
             return
         super().reject()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._test_worker is not None or self._pair_worker is not None:
+        if (
+            self._test_worker is not None
+            or self._openai_test_worker is not None
+            or self._pair_worker is not None
+        ):
             self._request_close_after_workers()
             event.ignore()
             return

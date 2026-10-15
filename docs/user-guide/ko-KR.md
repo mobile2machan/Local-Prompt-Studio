@@ -4,7 +4,7 @@
 
 ## 1. 개요
 
-Local Prompt Studio는 PC의 로컬 GGUF 언어 모델을 사용해 이미지 및 비디오 모델용 프롬프트를 구성하는 Windows 데스크톱 도구입니다. 주요 모드는 **Prompt Generation**, **AI 채팅**, **프롬프트 라이브러리** 세 가지입니다.
+Local Prompt Studio는 PC의 로컬 GGUF 모델 또는 설정된 OpenAI 호환 API를 사용해 이미지 및 비디오 모델용 프롬프트를 구성하는 Windows 데스크톱 도구입니다. 주요 모드는 **Prompt Generation**, **AI 채팅**, **프롬프트 라이브러리** 세 가지입니다.
 
 프롬프트 생성은 MiniMax H3, Wan 2.2, LTX-2.3, Krea 2, Anima Profile을 지원하며 각 Profile이 자체 Renderer와 출력 형식을 선택합니다. 완성된 프롬프트를 ComfyUI로 보내지 않는다면 ComfyUI는 필요하지 않습니다. 설치 프로그램이 없는 Portable 앱이며 지속 데이터는 압축을 푼 폴더 안에 저장됩니다.
 
@@ -28,8 +28,8 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 1. ZIP을 쓰기 가능한 새 폴더에 풉니다. ZIP 안에서 직접 실행하지 마세요.
 2. `LocalPromptStudio.exe`를 실행합니다.
-3. 초기 설정에서 기존 GGUF를 선택합니다.
-4. 처음에는 **CPU** 또는 llama.cpp가 감지한 **Vulkan GPU**를 선택합니다.
+3. 초기 설정에서 기존 GGUF를 선택하거나 GGUF 없이 OpenAI 호환 API를 사용하도록 선택합니다.
+4. 로컬 GGUF에서는 **CPU** 또는 llama.cpp가 감지한 **Vulkan GPU**를 선택합니다. API에서는 Settings에 Base URL과 모델 이름을 입력합니다.
 5. **카테고리**, **모델**, **모델 변형**, **작업**을 선택합니다.
 6. **요청 (입력 언어 자동 감지)**에 원하는 내용을 입력합니다.
 7. **프롬프트 생성**을 선택합니다.
@@ -37,7 +37,7 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 ## 4. 초기 설정
 
-GGUF 선택 버튼으로 PC의 기존 `.gguf`를 참조합니다. 앱은 GGUF를 복사하거나 자동 다운로드하지 않습니다. 원본 파일을 이동하거나 삭제했다면 다시 선택해야 합니다.
+llama.cpp 모드에서 GGUF 선택 버튼으로 PC의 기존 `.gguf`를 참조합니다. 앱은 GGUF를 복사하거나 자동 다운로드하지 않습니다. 원본 파일을 이동하거나 삭제했다면 다시 선택해야 합니다. OpenAI 호환 API 모드에서는 Settings에 API Base URL과 모델 이름을 입력합니다. API key는 선택 사항입니다.
 
 현재 안내는 높은 품질을 위해 Qwen3-8B Q4_K_M, 메모리가 적은 PC를 위해 Qwen3-4B Q4_K_M을 제안합니다. 이는 참고 사항이며 모든 GGUF 또는 양자화의 호환성을 보장하지 않습니다.
 
@@ -97,11 +97,11 @@ Profile의 Prompt 출력 언어가 번역 원본이고 **UI 언어**가 번역 �
 
 AI 채팅은 프롬프트 생성 GGUF를 공유하거나 별도 Chat GGUF를 사용할 수 있습니다. 동시에 model 하나만 상주하며 용도를 바꿀 때 현재 앱 소유 server를 안전하게 종료한 뒤 필요한 model을 로드합니다. 대화 Context는 현재 chat session 동안 유지됩니다.
 
-이미지 인식은 유효한 Chat model과 일치하는 `mmproj`를 설정해야 합니다. **+ 이미지** 또는 Drag & Drop으로 PNG, JPG／JPEG, 정적 WebP를 첨부할 수 있습니다. animated WebP는 지원하지 않습니다. 정적 WebP는 memory에서 PNG로 정규화한 뒤 localhost llama-server로 보냅니다.
+llama.cpp 모드에서는 유효한 Chat model과 일치하는 `mmproj`를 설정해야 합니다. OpenAI 호환 API 모드의 이미지 지원은 API model에 따라 다릅니다. **+ 이미지** 또는 Drag & Drop으로 PNG, JPG／JPEG, 정적 WebP를 첨부할 수 있습니다. animated WebP는 지원하지 않습니다. 정적 WebP는 memory에서 PNG로 정규화한 뒤 선택한 LLM endpoint로 보냅니다.
 
 **분석**은 일반 Chat 답변을 만들고 **프롬프트 참조 분석**은 Prompt Generation에서 재사용하기 쉬운 model-independent 정보를 만듭니다. transfer preview를 확인하고 편집한 다음 **프롬프트 보충으로 보내기**로 요청, 전체 보충, 시작 이미지 보충 또는 종료 이미지 보충에 추가합니다.
 
-이미지, Chat 내용, Prompt는 외부 cloud로 전송하지 않고 앱이 관리하는 localhost llama-server에서만 처리합니다.
+기본 llama.cpp 모드에서는 이미지, Chat 내용, Prompt를 앱이 관리하는 localhost llama-server로만 보냅니다. OpenAI 호환 API 모드를 선택하면 Prompt, Chat, 첨부 이미지를 설정된 endpoint로 보냅니다. LAN에서도 신뢰할 수 있는 endpoint를 선택하세요.
 
 ## 10. 프롬프트 라이브러리
 
@@ -157,8 +157,9 @@ ComfyUI 연동은 선택 사항입니다.
 - `data/prompt_library_datasets/<dataset-id>/prompt_library.sqlite3`
 - `data/skills/h3-prompt-writing/`
 - `data/comfyui_credentials.dat`
+- `data/openai_compatible_credentials.dat`
 
-앱 설정에 Registry를 사용하지 않고 Windows service나 Start Menu shortcut을 만들지 않습니다. 종료 후 압축 해제 폴더를 삭제하면 제거됩니다. telemetry, 광고, analytics가 없습니다. 일반 Prompt 생성은 선택한 GGUF와 `127.0.0.1`만 사용합니다. H3 Skill 가져오기／업데이트 확인, 공식 model page 열기, ComfyUI Test Connection／Pair／Send 등 명시한 작업만 network를 사용합니다. Request와 생성 Prompt를 일반 log에 저장하지 않습니다. ComfyUI credential은 DPAPI CurrentUser로 보호되며 공유하면 안 됩니다. 필요한 데이터를 준비하면 일반 생성은 offline으로 작동합니다.
+앱 설정에 Registry를 사용하지 않고 Windows service나 Start Menu shortcut을 만들지 않습니다. 종료 후 압축 해제 폴더를 삭제하면 제거됩니다. telemetry, 광고, analytics가 없습니다. 기본 llama.cpp 모드는 선택한 GGUF와 `127.0.0.1`만 사용합니다. OpenAI 호환 API 모드는 Request, Chat, 첨부 이미지를 설정된 endpoint로 보내며 네트워크 연결이 필요합니다. API key는 Windows DPAPI CurrentUser로 보호됩니다. Request와 생성 Prompt를 일반 log에 저장하지 않습니다.
 
 ## 15. 업데이트 및 백업
 

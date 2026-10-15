@@ -4,7 +4,7 @@
 
 ## 1. 概述
 
-Local Prompt Studio是一款Windows桌面工具，使用本机GGUF语言模型为图像和视频模型整理Prompt。它包含三个主要模式：**Prompt Generation**、**AI Chat**和**Prompt Library**。
+Local Prompt Studio是一款Windows桌面工具，可使用本机GGUF模型或配置的OpenAI兼容API为图像和视频模型整理Prompt。它包含三个主要模式：**Prompt Generation**、**AI Chat**和**Prompt Library**。
 
 Prompt生成支持MiniMax H3、Wan 2.2、LTX-2.3、Krea 2和Anima Profile；每个Profile会选择自己的Renderer和输出格式。不使用Prompt发送功能时无需安装ComfyUI。本程序为免安装Portable应用，持久数据保存在解压目录内。
 
@@ -28,8 +28,8 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 1. 将ZIP解压到新的可写目录，不要在ZIP内直接运行。
 2. 启动`LocalPromptStudio.exe`。
-3. 在初始设置中选择已有GGUF。
-4. 首次使用选择**CPU**，或选择llama.cpp检测到的**Vulkan GPU**。
+3. 在初始设置中选择已有GGUF，或选择不使用GGUF并使用OpenAI兼容API。
+4. 使用本机GGUF时选择**CPU**或llama.cpp检测到的**Vulkan GPU**。使用API时，请在设置中输入Base URL和模型名称。
 5. 选择**类别**、**模型**、**Variant**和**Task**。
 6. 在**Request（自动识别输入语言）**中输入需求。
 7. 点击**生成Prompt**。
@@ -37,7 +37,7 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 ## 4. 初始设置
 
-使用**选择GGUF**引用PC上的`.gguf`文件。程序不会复制或自动下载GGUF；移动或删除原文件后需要重新选择。
+llama.cpp模式下，使用**选择GGUF**引用PC上的`.gguf`文件。程序不会复制或自动下载GGUF；移动或删除原文件后需要重新选择。OpenAI兼容API模式下，在设置中输入API Base URL和模型名称；API key为可选。
 
 当前说明将Qwen3-8B Q4_K_M作为较高质量选择，并将Qwen3-4B Q4_K_M作为低内存PC的选择。这只是建议，不代表所有GGUF或量化都兼容。
 
@@ -97,11 +97,11 @@ Profile的Prompt输出语言是翻译源，**UI语言**是翻译目标。当前B
 
 AI Chat可以共享Prompt生成GGUF，也可以使用专用Chat GGUF。同时只驻留一个model；切换用途时会先安全停止当前server，再加载所需model。会话Context保留在当前chat session中。
 
-图像识别需要为有效Chat model配置匹配的`mmproj`。使用**+ 图像**或Drag & Drop添加PNG、JPG／JPEG、静止WebP。animated WebP不受支持。静止WebP会在memory中标准化为PNG，再发送给localhost llama-server。
+llama.cpp模式下，图像识别需要为有效Chat model配置匹配的`mmproj`。OpenAI兼容API模式下，图像支持取决于API model。使用**+ 图像**或Drag & Drop添加PNG、JPG／JPEG、静止WebP。animated WebP不受支持。静止WebP会在memory中标准化为PNG，再发送给当前LLM连接端点。
 
 **分析**生成普通Chat回答；**Prompt Reference分析**生成便于Prompt生成复用的model-independent信息。检查并编辑transfer preview，然后通过**发送到Prompt补充**追加到Request、整体补充、开始图像补充或结束图像补充。
 
-图像、Chat内容和Prompt不会发送到外部cloud，只由本程序管理的localhost llama-server处理。
+默认llama.cpp模式下，图像、Chat内容和Prompt只发送给本程序管理的localhost llama-server。选择OpenAI兼容API模式后，Prompt、Chat和附件图像会发送到配置的端点，该端点也可以位于LAN内。请选择可信任的端点。
 
 ## 10. Prompt Library
 
@@ -157,8 +157,9 @@ ComfyUI集成为可选功能。
 - `data/prompt_library_datasets/<dataset-id>/prompt_library.sqlite3`
 - `data/skills/h3-prompt-writing/`
 - `data/comfyui_credentials.dat`
+- `data/openai_compatible_credentials.dat`
 
-程序不使用Registry保存应用设置，不安装Windows service，也不创建Start Menu shortcut。关闭后删除解压目录即可卸载。程序没有telemetry、广告或analytics。普通Prompt生成只使用所选GGUF和`127.0.0.1`。只有明确执行H3 Skill获取／更新检查、打开官方model page、ComfyUI Test Connection／Pair／Send等操作才访问network。Request和生成Prompt通常不会写入应用log。ComfyUI credential由DPAPI CurrentUser保护，禁止分享。准备好本地数据后，普通生成可离线运行。
+程序不使用Registry保存应用设置，不安装Windows service，也不创建Start Menu shortcut。关闭后删除解压目录即可卸载。程序没有telemetry、广告或analytics。默认llama.cpp模式只使用所选GGUF和`127.0.0.1`。OpenAI兼容API模式会把Request、Chat和附件图像发送到配置的端点，并需要网络连接。API key由Windows DPAPI CurrentUser保护。Request和生成Prompt通常不会写入应用log。
 
 ## 15. 更新与备份
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added an OpenAI-compatible LLM mode for Prompt Generation, AI Chat, Prompt Translation, and chat-based Prompt transfer.
+- Added LAN API endpoint, model, optional API key, connection test, and first-run setup without a local GGUF.
+- Protected saved API keys with Windows DPAPI and documented that prompts, chats, and attached images are sent to the selected endpoint.
+
 ## 3.1.1 — 2026-08-29
 
 Multilingual UI and prompt translation update.

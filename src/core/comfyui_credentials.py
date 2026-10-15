@@ -48,7 +48,7 @@ class _DataBlob(ctypes.Structure):
 class WindowsDpapiProtector:
     """Protect data with Windows DPAPI in the current-user scope."""
 
-    def __init__(self) -> None:
+    def __init__(self, description: str = "Local Prompt Studio ComfyUI credential") -> None:
         if sys.platform != "win32":
             raise CredentialStoreError(
                 "credential_unavailable",
@@ -62,6 +62,7 @@ class WindowsDpapiProtector:
                 "credential_unavailable",
                 "Windows DPAPI could not be initialized.",
             ) from None
+        self.description = description
 
         blob_pointer = ctypes.POINTER(_DataBlob)
         self._crypt32.CryptProtectData.argtypes = [
@@ -101,7 +102,7 @@ class WindowsDpapiProtector:
         output_blob = _DataBlob()
         result = self._crypt32.CryptProtectData(
             ctypes.byref(input_blob),
-            "Local Prompt Studio ComfyUI credential",
+            self.description,
             None,
             None,
             None,
@@ -176,10 +177,13 @@ class ComfyUICredentialStore:
         data_dir: Path | str,
         *,
         protector: DataProtector | None = None,
+        file_name: str = CREDENTIAL_FILE_NAME,
+        purpose: str = "Local Prompt Studio ComfyUI credential",
     ) -> None:
         self.data_dir = Path(data_dir)
-        self.path = self.data_dir / CREDENTIAL_FILE_NAME
+        self.path = self.data_dir / file_name
         self._protector = protector
+        self._purpose = purpose
 
     @property
     def exists(self) -> bool:
@@ -198,7 +202,7 @@ class ComfyUICredentialStore:
 
     def _data_protector(self) -> DataProtector:
         if self._protector is None:
-            self._protector = WindowsDpapiProtector()
+            self._protector = WindowsDpapiProtector(self._purpose)
         return self._protector
 
     def save(
@@ -215,7 +219,7 @@ class ComfyUICredentialStore:
             or len(client_id) > 256
             or not isinstance(client_credential, str)
             or not client_credential
-            or len(client_credential) > 512
+            or len(client_credential) > 4096
         ):
             raise CredentialStoreError(
                 "credential_persistence_failed",
@@ -359,7 +363,7 @@ class ComfyUICredentialStore:
             or len(client_id) > 256
             or not isinstance(client_credential, str)
             or not client_credential
-            or len(client_credential) > 512
+            or len(client_credential) > 4096
         ):
             raise CredentialStoreError(
                 "credential_unavailable",
@@ -384,3 +388,26 @@ class ComfyUICredentialStore:
                 "credential_unavailable",
                 "The protected ComfyUI credential could not be removed.",
             ) from None
+
+
+class OpenAICompatibleCredentialStore(ComfyUICredentialStore):
+    """Keep an optional OpenAI-compatible bearer token in a separate DPAPI file."""
+
+    def __init__(
+        self,
+        data_dir: Path | str,
+        *,
+        protector: DataProtector | None = None,
+    ) -> None:
+        super().__init__(
+            data_dir,
+            protector=protector,
+            file_name="openai_compatible_credentials.dat",
+            purpose="Local Prompt Studio OpenAI-compatible API key",
+        )
+
+    def save(self, normalized_base_url: str, api_key: str) -> None:
+        super().save(normalized_base_url, "openai-compatible", api_key)
+
+    def load(self, normalized_base_url: str) -> str:
+        return super().load(normalized_base_url).client_credential

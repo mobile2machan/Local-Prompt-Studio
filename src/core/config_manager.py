@@ -20,6 +20,9 @@ THEME_NORMAL = "normal"
 THEME_DARK = "dark"
 DEFAULT_CONTEXT_SIZE = 8192
 DEFAULT_COMFYUI_URL = "http://127.0.0.1:8188"
+DEFAULT_OPENAI_BASE_URL = "http://127.0.0.1:8000/v1"
+LLM_PROVIDER_LLAMA_CPP = "llama_cpp"
+LLM_PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"
 DEFAULT_PROMPT_LIBRARY_TAG_ROWS = 3
 DEFAULT_PROMPT_LIBRARY_RESULT_ROWS = 3
 DEFAULT_PROMPT_LIBRARY_DETAIL_LINES = 10
@@ -94,6 +97,11 @@ class AppConfig:
     prompt_library_tag_rows: int = DEFAULT_PROMPT_LIBRARY_TAG_ROWS
     prompt_library_result_rows: int = DEFAULT_PROMPT_LIBRARY_RESULT_ROWS
     prompt_library_detail_lines: int = DEFAULT_PROMPT_LIBRARY_DETAIL_LINES
+    llm_provider: str = LLM_PROVIDER_LLAMA_CPP
+    openai_base_url: str = DEFAULT_OPENAI_BASE_URL
+    openai_model: str = ""
+    # Loaded only for an active request; ConfigManager never writes this value to JSON.
+    openai_api_key: str = field(default="", repr=False)
 
     def normalized(self) -> "AppConfig":
         self.inference_backend = normalize_backend_id(self.inference_backend)
@@ -122,6 +130,17 @@ class AppConfig:
         if not isinstance(self.use_prompt_model_for_chat, bool):
             self.use_prompt_model_for_chat = True
         self.chat_model_path = str(self.chat_model_path or "").strip()
+        self.llm_provider = (
+            self.llm_provider
+            if self.llm_provider in {
+                LLM_PROVIDER_LLAMA_CPP,
+                LLM_PROVIDER_OPENAI_COMPATIBLE,
+            }
+            else LLM_PROVIDER_LLAMA_CPP
+        )
+        self.openai_base_url = str(self.openai_base_url or DEFAULT_OPENAI_BASE_URL).strip()
+        self.openai_model = str(self.openai_model or "").strip()
+        self.openai_api_key = str(self.openai_api_key or "")
         normalized_mmproj: dict[str, str] = {}
         if isinstance(self.model_mmproj_paths, dict):
             for model_path, mmproj_path in self.model_mmproj_paths.items():
@@ -219,6 +238,7 @@ class ConfigManager:
                     DEFAULT_PROMPT_LIBRARY_DETAIL_LINES,
                 )
             raw["config_version"] = CONFIG_VERSION
+            raw.pop("openai_api_key", None)
             allowed = {item.name for item in fields(AppConfig)}
             values = {key: value for key, value in raw.items() if key in allowed}
             return AppConfig(**values).normalized()
@@ -237,7 +257,9 @@ class ConfigManager:
 
     def save(self, config: AppConfig) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(asdict(config.normalized()), ensure_ascii=False, indent=2)
+        values = asdict(config.normalized())
+        values.pop("openai_api_key", None)
+        payload = json.dumps(values, ensure_ascii=False, indent=2)
         file_descriptor, temporary_name = tempfile.mkstemp(
             prefix="config-", suffix=".tmp", dir=self.data_dir
         )

@@ -7,6 +7,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -19,7 +20,11 @@ from PySide6.QtWidgets import (
     QWizardPage,
 )
 
-from core.config_manager import ConfigManager
+from core.config_manager import (
+    ConfigManager,
+    LLM_PROVIDER_LLAMA_CPP,
+    LLM_PROVIDER_OPENAI_COMPATIBLE,
+)
 from core.inference_backends import BACKEND_CPU, BACKEND_VULKAN, GPU_LAYERS_AUTO
 from core.llama_manager import LlamaServerManager
 from core.localization import Localization
@@ -83,15 +88,22 @@ class SetupDialog(QWizard):
         self.model_path = QLineEdit(self.config.model_path)
         self.model_path.setReadOnly(True)
         layout.addWidget(self.model_path)
-        choose = QPushButton(self.tr("setup.model.choose"))
-        choose.clicked.connect(self._choose_model)
-        layout.addWidget(choose)
+        self.model_choose = QPushButton(self.tr("setup.model.choose"))
+        self.model_choose.clicked.connect(self._choose_model)
+        layout.addWidget(self.model_choose)
         open_page = QPushButton(self.tr("setup.model.open_recommended"))
         open_page.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(RECOMMENDED_MODEL_URL)))
         layout.addWidget(open_page)
         self.model_status = QLabel(self.tr("settings.model.not_set"))
         self.model_status.setWordWrap(True)
         layout.addWidget(self.model_status)
+        self.openai_mode = QCheckBox(self.tr("setup.model.openai_mode"))
+        self.openai_mode.setChecked(
+            self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+        )
+        self.openai_mode.toggled.connect(self._update_model_setup_mode)
+        layout.addWidget(self.openai_mode)
+        self._update_model_setup_mode(self.openai_mode.isChecked())
         layout.addStretch()
         self.addPage(page)
 
@@ -172,6 +184,19 @@ class SetupDialog(QWizard):
             self.model_path.setText(resolved)
             self.model_status.setText(self.tr("setup.model.selected", path=resolved))
 
+    def _update_model_setup_mode(self, use_openai: bool) -> None:
+        self.model_path.setEnabled(not use_openai)
+        self.model_choose.setEnabled(not use_openai)
+        self.model_status.setText(
+            self.tr("setup.model.openai_configure")
+            if use_openai
+            else (
+                self.tr("setup.model.selected", path=self.model_path.text())
+                if self.model_path.text()
+                else self.tr("settings.model.not_set")
+            )
+        )
+
     def _fetch_skill(self) -> None:
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
@@ -208,7 +233,11 @@ class SetupDialog(QWizard):
             self.confirmation.setText(
                 self.tr(
                     "setup.confirm.summary",
-                    model=self.model_path.text() or self.tr("readiness.not_set"),
+                    model=(
+                        self.tr("settings.llm_provider.openai")
+                        if self.openai_mode.isChecked()
+                        else self.model_path.text() or self.tr("readiness.not_set")
+                    ),
                     skill=(
                         self.tr("readiness.installed")
                         if status.valid
@@ -223,12 +252,18 @@ class SetupDialog(QWizard):
             )
 
     def accept(self) -> None:
-        try:
-            validate_model(self.model_path.text())
-        except ValueError as exc:
-            QMessageBox.warning(self, self.tr("setup.incomplete"), str(exc))
-            return
+        if not self.openai_mode.isChecked():
+            try:
+                validate_model(self.model_path.text())
+            except ValueError as exc:
+                QMessageBox.warning(self, self.tr("setup.incomplete"), str(exc))
+                return
         self.config.model_path = self.model_path.text()
+        self.config.llm_provider = (
+            LLM_PROVIDER_OPENAI_COMPATIBLE
+            if self.openai_mode.isChecked()
+            else LLM_PROVIDER_LLAMA_CPP
+        )
         self.config.skill_location = str(self.skill_path.resolve())
         self.config.inference_backend = (
             BACKEND_VULKAN if self.gpu_radio.isChecked() else BACKEND_CPU

@@ -4,7 +4,7 @@
 
 ## 1. 概要
 
-Local Prompt Studioは、PC上のGGUF言語モデルを使い、画像・動画モデル向けPromptを整えるWindowsデスクトップツールです。メインモードは**Prompt Generation**、**AIチャット**、**Prompt Library**の3つです。
+Local Prompt Studioは、PC上のGGUFモデルまたは設定したOpenAI互換APIを使い、画像・動画モデル向けPromptを整えるWindowsデスクトップツールです。メインモードは**Prompt Generation**、**AIチャット**、**Prompt Library**の3つです。
 
 Prompt生成はMiniMax H3、Wan 2.2、LTX-2.3、Krea 2、Anima Profileに対応し、各Profileが専用Rendererと出力形式を選びます。完成PromptをComfyUIへ送らない限り、ComfyUIは不要です。インストーラーを使わないPortable構成で、永続データは展開フォルダ内に保存されます。
 
@@ -12,7 +12,7 @@ Prompt生成はMiniMax H3、Wan 2.2、LTX-2.3、Krea 2、Anima Profileに対応�
 
 - Windows 10／11 x64
 - 展開先として使用できる書き込み可能なフォルダ
-- 選択するGGUFとContext Sizeに十分なSystem RAM
+- llama.cpp用GGUFとContext Sizeに十分なSystem RAM、またはAPI接続先へのアクセス
 - Vulkan利用時はVulkan対応GPUと正常なGPUドライバー
 - Python、Git、pip、CUDA、管理者権限、手動PATH設定は不要
 
@@ -28,8 +28,8 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 1. ZIPを新しい書き込み可能なフォルダへ展開します。ZIP内から直接実行しません。
 2. `LocalPromptStudio.exe`を起動します。
-3. 初期設定で手元のGGUFを選択します。
-4. 最初は**CPU**、またはllama.cppが検出した**Vulkan GPU**を選びます。
+3. 初期設定で手元のGGUFを選ぶか、**GGUFを使わずOpenAI互換APIを使用**を選択します。
+4. llama.cppではCPUまたはVulkan GPUを選びます。APIでは設定からBase URLとmodel名を入力します。
 5. **カテゴリ**、**モデル**、**バリアント**、**タスク**を選びます。
 6. **Request（入力言語は自動判定）**へ内容を入力します。
 7. **Promptを生成**を押します。
@@ -37,7 +37,7 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 ## 4. 初回セットアップ
 
-**既存のGGUFを選択**でPC上の`.gguf`を参照します。アプリはGGUFをコピーも自動ダウンロードもしません。元ファイルを移動・削除した場合は再選択が必要です。
+llama.cppモードでは**既存のGGUFを選択**でPC上の`.gguf`を参照します。アプリはGGUFをコピーも自動ダウンロードもしません。OpenAI互換APIモードでは、設定から接続方式、API Base URL、model名を指定します。API keyは任意です。
 
 現行の案内では、品質重視にQwen3-8B Q4_K_M、メモリが少ないPCにQwen3-4B Q4_K_Mを提示しています。これは目安であり、すべてのGGUFや量子化の互換性を保証するものではありません。
 
@@ -55,7 +55,7 @@ MiniMax H3だけは公式H3 Prompt Skillが必要です。オンライン時に�
 - 推定memoryが不足する場合は警告します。他アプリを閉じる、Contextを下げる、より小さいGGUFを使う方法があります。
 - Prompt生成とChatの最大待機時間は300秒です。
 
-アプリは外部llama-server processを1つだけ管理します。model、backend、device、Context、threadが同じ間は再利用し、必要なときだけ再起動します。**モデルをアンロード**はアプリ管理下serverを停止してmodel memoryを解放し、次回生成時に再読込します。Cancel、timeout、アプリ終了時も、このアプリが起動したserverだけを終了します。
+llama.cppモードではアプリが外部llama-server processを1つだけ管理します。model、backend、device、Context、threadが同じ間は再利用し、必要なときだけ再起動します。**モデルをアンロード**はアプリ管理下serverを停止してmodel memoryを解放し、次回生成時に再読込します。APIモードでは推論Backendやローカルmodel memory設定は適用されません。
 
 ## 6. Prompt Generation
 
@@ -95,13 +95,13 @@ ProfileのPrompt出力言語が翻訳元、**UI言語**が翻訳先です。現�
 
 ## 9. AIチャットとVision
 
-AIチャットはPrompt生成GGUFを共有するか、専用GGUFを使用できます。同時常駐modelは1つで、用途切替時は現在のアプリ管理serverを停止してから必要modelを読み込みます。会話Contextは現在のchat session内で保持されます。
+llama.cppモードのAIチャットはPrompt生成GGUFを共有するか、専用GGUFを使用できます。同時常駐modelは1つで、用途切替時は現在のアプリ管理serverを停止してから必要modelを読み込みます。APIモードでは設定済みAPI modelを使用します。会話Contextは現在のchat session内で保持されます。
 
-画像認識には、有効なChat modelに対応する`mmproj`を設定します。**＋画像**またはDrag & DropでPNG、JPG／JPEG、静止WebPを添付できます。animated WebPは非対応です。静止WebPはmemory上でPNGへ正規化してからlocalhost llama-serverへ送ります。
+llama.cppモードでは、有効なChat modelに対応する`mmproj`を設定します。OpenAI互換APIモードでは、画像対応は接続先のmodelに依存します。**＋画像**またはDrag & DropでPNG、JPG／JPEG、静止WebPを添付できます。animated WebPは非対応です。静止WebPはmemory上でPNGへ正規化してから選択中のLLM接続先へ送ります。
 
 **通常解析**は自由なChat回答を、**Prompt参照用解析**はPrompt生成で再利用しやすいmodel非依存情報を作ります。転送previewを確認・編集し、**Prompt補足へ転送**でRequest、共通補足、開始画像補足、終了画像補足の対応先へ追記します。
 
-画像、Chat本文、Promptは外部cloudへ送られず、アプリ管理下のlocalhost llama-serverだけで処理されます。
+標準のllama.cppモードでは、画像、Chat本文、Promptはアプリ管理下のlocalhost llama-serverだけへ送信されます。OpenAI互換APIモードを選ぶと、Prompt、Chat、添付画像は設定した接続先へ送信されます。LAN内でも信頼できるserverを指定してください。
 
 ## 10. Prompt Library
 
@@ -133,7 +133,11 @@ ComfyUI連携は任意です。
 
 ## 13. 設定リファレンス
 
-- **LLMモデルパス**: Prompt生成用の既存GGUF
+- **LLM接続方式**: アプリ管理下のllama.cpp、またはOpenAI互換API
+- **OpenAI互換API**: Base URL、model名、任意API key、接続テスト
+- **LLM接続方式**: アプリ管理下のllama.cpp、またはOpenAI互換API
+- **OpenAI互換API**: Base URL、model名、任意API key、接続テスト
+- **LLMモデルパス**: llama.cppモードでPrompt生成に使う既存GGUF
 - **推論Backend**、**Vulkan Device**、**CPU Threads**、**GPU Offload**、**Context Size**: llama.cpp実行・memory設定
 - **Skill保存場所**: MiniMax H3 Skillと更新操作
 - **履歴**: 任意のlocal生成History。既定OFF
@@ -142,7 +146,7 @@ ComfyUI連携は任意です。
 - **Prompt Library**: Tags／検索結果の表示行数とPrompt詳細最小行数
 - **ComfyUI連携**: URL、接続テスト、Pairing
 
-設定はPortable内へ保存され、GGUF自体を変更しません。
+設定はPortable内へ保存され、GGUF自体を変更しません。API keyはWindows DPAPI CurrentUserで暗号化して保存します。
 
 ## 14. Portable Data、Privacy、Offline利用
 
@@ -157,8 +161,9 @@ Portable版の永続データは同じfolderの`data`内です。
 - 追加Dataset: `data/prompt_library_datasets/<dataset-id>/prompt_library.sqlite3`
 - 取得したH3 Skill: `data/skills/h3-prompt-writing/`
 - ComfyUI credential: `data/comfyui_credentials.dat`
+- OpenAI互換API key: `data/openai_compatible_credentials.dat`
 
-アプリ設定にRegistryを使わず、Windows serviceやStart Menu shortcutを作りません。終了後に展開folderを削除すれば除去できます。telemetry、広告、analyticsはありません。通常のPrompt生成は選択GGUFと`127.0.0.1`だけを使います。networkはH3 Skill取得／更新確認、公式model pageを開く操作、ComfyUI Test Connection／Pair／Send等をユーザーが明示した場合だけです。Requestと生成Promptを通常logへ保存しません。credentialはDPAPI CurrentUser保護で、共有してはいけません。必要data準備後は通常生成をoffline利用できます。
+アプリ設定にRegistryを使わず、Windows serviceやStart Menu shortcutを作りません。終了後に展開folderを削除すれば除去できます。telemetry、広告、analyticsはありません。標準のllama.cppモードは選択GGUFと`127.0.0.1`だけを使います。OpenAI互換APIモードはRequest、Chat、添付画像を設定した接続先へ送信し、serverへのnetwork接続が必要です。API keyはDPAPI CurrentUserで暗号化して保存します。Requestと生成Promptを通常logへ保存しません。その他のnetwork操作はH3 Skill取得／更新確認、公式model pageを開く操作、ComfyUI Test Connection／Pair／Send等をユーザーが明示した場合だけです。
 
 ## 15. 更新とバックアップ
 
@@ -174,7 +179,7 @@ cloud同期、Dataset自動merge、すべてのPortable dataを対象にした�
 ## 16. トラブルシューティング
 
 - **設定を書き込めない**: userが書き込めるfolderへ展開し直します。ZIP内から実行しません。
-- **モデル未設定**: 設定で既存GGUFを選びます。modelはcopyされず参照されます。
+- **モデル未設定**: 設定で既存GGUFを選ぶか、OpenAI互換APIのBase URLとmodel名を入力します。
 - **H3 Skill未設定**: MiniMax H3だけ、onlineで公式Skill取得を行います。他Profileには不要です。
 - **Vulkan Device未検出**: GPU driverを確認・更新するかCPUへ戻ります。device判定はllama.cppに従います。
 - **Context不足**: 8192、memoryに余裕があれば16384を使い、必要なら入力を減らします。

@@ -10,7 +10,7 @@
 
 Download the Windows portable ZIP and verify it against the included `SHA256SUMS.txt`. Avoid executables redistributed by unofficial sources.
 
-Local Prompt Studio is a portable Windows desktop application for turning requests into model-specific prompts with a local GGUF language model. It also provides local AI chat and a local Prompt Library. ComfyUI is optional.
+Local Prompt Studio is a portable Windows desktop application for turning requests into model-specific prompts with either a local GGUF model or a configured OpenAI-compatible API, including a server on your LAN. It also provides AI chat and a local Prompt Library. ComfyUI is optional.
 
 ## Main modes
 
@@ -25,15 +25,15 @@ UI languages: English (`en-US`), 日本語 (`ja-JP`), 简体中文 (`zh-CN`), Р
 ## Quick start
 
 1. Download the portable ZIP from the official Release page and extract it to a new writable folder.
-2. Run `LocalPromptStudio.exe` and select an existing GGUF model.
-3. Start with CPU, or select a Vulkan device detected by the bundled llama.cpp runtime.
+2. Run `LocalPromptStudio.exe` and select an existing GGUF model, or choose the OpenAI-compatible API option in first-run setup.
+3. For a local GGUF, start with CPU or select a Vulkan device detected by the bundled llama.cpp runtime. For an API, enter its Base URL and model name under Settings.
 4. Choose a Profile and Task, enter a Request, select **Generate Prompt**, then copy the result or save it to Prompt Library.
 
 GGUF models and `mmproj` files are **not bundled**. MiniMax H3 additionally requires its official Prompt Skill, which the application downloads only when you explicitly request it. The optional `ComfyUI-Bridge/MMH3PromptBridge` extension is included for ComfyUI integration.
 
 ## Portable and private by design
 
-Application settings, logs, optional History, Prompt Library datasets, downloaded Skill data, and ComfyUI credentials stay under the extracted folder's `data` directory. The application does not install a Windows service, write application settings to the Registry, create Start Menu shortcuts, or use telemetry, advertising, or analytics. Normal prompt generation communicates only with the application-managed llama-server on `127.0.0.1`.
+Application settings, logs, optional History, Prompt Library datasets, downloaded Skill data, and credentials stay under the extracted folder's `data` directory. The application does not install a Windows service, write application settings to the Registry, create Start Menu shortcuts, or use telemetry, advertising, or analytics. The default llama.cpp mode sends prompts to the application-managed llama-server on `127.0.0.1`. When OpenAI-compatible mode is selected, generation requests, chat messages, and attached images are sent to the configured endpoint; the optional API key is protected with Windows DPAPI.
 
 To remove the application, close it and delete its extracted folder. Back up the `data` directory or export Prompt Library datasets before deleting an installation you want to keep.
 

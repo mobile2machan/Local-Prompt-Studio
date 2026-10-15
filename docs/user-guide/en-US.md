@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-Local Prompt Studio is a Windows desktop tool that uses a GGUF language model on your PC to prepare prompts for image and video models. Its three main modes are **Prompt Generation**, **AI Chat**, and **Prompt Library**.
+Local Prompt Studio is a Windows desktop tool that prepares prompts for image and video models with either a GGUF model on your PC or a configured OpenAI-compatible API. Its three main modes are **Prompt Generation**, **AI Chat**, and **Prompt Library**.
 
 Prompt Generation supports MiniMax H3, Wan 2.2, LTX-2.3, Krea 2, and Anima profiles. Each profile selects its own renderer and output format. ComfyUI is not required unless you want to send a completed prompt to a widget in an open ComfyUI workflow.
 
@@ -14,7 +14,7 @@ The application is portable: there is no installer, and its persistent applicati
 
 - Windows 10 or Windows 11 x64.
 - A writable folder for the extracted application.
-- Enough System RAM for your chosen GGUF and Context Size.
+- Enough System RAM for a chosen local GGUF and Context Size, or access to your API endpoint.
 - For Vulkan GPU use, a Vulkan-capable GPU and a working vendor driver.
 - Python, Git, pip, CUDA, administrator rights, and manual PATH setup are not required.
 
@@ -30,8 +30,8 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 1. Extract the ZIP into a new writable folder; do not run it inside the ZIP.
 2. Start `LocalPromptStudio.exe`.
-3. Select an existing GGUF when setup asks for one.
-4. Start with **CPU**, or choose a **Vulkan GPU** device detected by llama.cpp.
+3. Select an existing GGUF when setup asks, or choose **OpenAI-compatible API without a GGUF**.
+4. For a local GGUF, start with **CPU** or choose a **Vulkan GPU** detected by llama.cpp. For an API, enter its Base URL and model name in Settings.
 5. Choose **Category**, **Model**, **Variant**, and **Task**.
 6. Enter what you want in **Request (input language is automatic)**.
 7. Select **Generate Prompt**.
@@ -39,7 +39,7 @@ Get-FileHash .\Local-Prompt-Studio-<version>-win-x64-portable.zip -Algorithm SHA
 
 ## 4. Initial Setup
 
-Use **Choose GGUF** to reference an existing `.gguf` file. The application does not copy or download it; moving or deleting that file means you must select it again.
+In llama.cpp mode, use **Choose GGUF** to reference an existing `.gguf` file. The application does not copy or download it; moving or deleting that file means you must select it again. In OpenAI-compatible mode, open **Settings**, choose that provider, and enter the API Base URL and model name. An API key is optional.
 
 Current guidance recommends Qwen3-8B Q4_K_M for higher quality. Qwen3-4B Q4_K_M is an option for PCs with less memory. This is guidance, not a claim that every GGUF or quantization is compatible.
 
@@ -57,7 +57,7 @@ Choose CPU first when uncertain. If the bundled Vulkan llama.cpp runtime detects
 - A warning appears when the selected model and context are likely to exceed current or installed RAM. Close other applications, reduce Context Size, or use a smaller model.
 - Prompt and chat operations can wait up to 300 seconds for generation.
 
-The application owns one external llama-server process. It reuses the server while model, backend, device, context, and thread settings match, and restarts it when required. **Unload model** stops the application-owned server and frees its model memory; the next generation starts and loads it again. Cancel, timeout, and application shutdown stop only the server owned by Local Prompt Studio.
+In llama.cpp mode, the application owns one external llama-server process. It reuses the server while model, backend, device, context, and thread settings match, and restarts it when required. **Unload model** stops the application-owned server and frees its model memory; the next generation starts and loads it again. In API mode, inference controls and local model memory checks do not apply.
 
 ## 6. Prompt Generation
 
@@ -97,13 +97,13 @@ The Profile output language is the translation source, and the language selected
 
 ## 9. AI Chat and Vision
 
-AI Chat can share the Prompt Generation GGUF or use a separate Chat GGUF. Only one model remains resident; switching use safely stops the current application-owned server before loading the other model. Conversation context is retained for the current chat session.
+In llama.cpp mode, AI Chat can share the Prompt Generation GGUF or use a separate Chat GGUF. Only one model remains resident; switching use safely stops the current application-owned server before loading the other model. In API mode, Chat uses the configured API model and conversation context is retained for the current chat session.
 
-For vision, configure a matching `mmproj` for the effective Chat model. Use **+ Image** or drag and drop a PNG, JPG/JPEG, or static WebP. Animated WebP is unsupported. A static WebP is decoded and normalized to PNG in memory before it is sent to the local llama-server.
+In llama.cpp mode, configure a matching `mmproj` for the effective Chat model. In OpenAI-compatible mode, image support depends on the selected API model. Use **+ Image** or drag and drop a PNG, JPG/JPEG, or static WebP. Animated WebP is unsupported. A static WebP is decoded and normalized to PNG in memory before it is sent to the selected LLM endpoint.
 
 **Analyze** provides a normal chat analysis. **Prompt Reference Analysis** produces model-independent reference information intended for Prompt Generation. Review the transfer preview, edit it if needed, and use **Send to prompt supplement** to append it to Request, Overall Supplement, Start image supplement, or End image supplement as supported by the target Task.
 
-Images, chat messages, and prompts are sent only to the application-managed localhost llama-server, not to an external cloud service.
+In the default llama.cpp mode, images, chat messages, and prompts are sent only to the application-managed localhost llama-server. If OpenAI-compatible mode is selected, prompts, chats, and attached images go to the configured endpoint, which may be another LAN computer. Choose an endpoint you trust.
 
 ## 10. Prompt Library
 
@@ -135,7 +135,9 @@ Sending replaces text in the selected browser workflow widget. It does not queue
 
 ## 13. Settings Reference
 
-- **LLM Model Path**: existing Prompt Generation GGUF.
+- **LLM connection**: select application-managed llama.cpp or an OpenAI-compatible API.
+- **OpenAI-compatible API**: Base URL, model name, optional API key, and connection test.
+- **LLM Model Path**: existing Prompt Generation GGUF used in llama.cpp mode.
 - **Inference Backend**, **Vulkan Device**, **CPU Threads**, **GPU Offload**, **Context Size**: llama.cpp execution and memory controls.
 - **Skill Location**: MiniMax H3 Prompt Skill location and update actions.
 - **History**: optional local generation History; off by default.
@@ -144,7 +146,7 @@ Sending replaces text in the selected browser workflow widget. It does not queue
 - **Prompt Library**: visible Tag rows, Result rows, and Prompt-detail minimum lines.
 - **ComfyUI Integration**: server URL, connection test, and pairing.
 
-Settings are portable and do not change your GGUF files.
+Settings are portable and do not change your GGUF files. API keys are stored encrypted with Windows DPAPI CurrentUser.
 
 ## 14. Portable Data, Privacy, and Offline Use
 
@@ -159,10 +161,12 @@ The portable release stores persistent application data under its own `data` dir
 - Additional Datasets: `data/prompt_library_datasets/<dataset-id>/prompt_library.sqlite3`
 - Downloaded H3 Skill: `data/skills/h3-prompt-writing/`
 - ComfyUI credential: `data/comfyui_credentials.dat`
+- OpenAI-compatible API key: `data/openai_compatible_credentials.dat`
+- OpenAI-compatible API key: `data/openai_compatible_credentials.dat`
 
-The application does not use the Registry for application settings, install a Windows service, or create Start Menu shortcuts. Close it and delete the extracted folder to remove it. There is no telemetry, advertising, or analytics. Normal Prompt Generation uses the selected GGUF through `127.0.0.1`. Network access occurs only for explicit operations such as H3 Skill retrieval/update checks, opening an official model page, or ComfyUI Test Connection/Pair/Send. Requests and generated Prompts are not normally written to the application log. The ComfyUI credential is protected with DPAPI CurrentUser and must not be shared.
+The application does not use the Registry for application settings, install a Windows service, or create Start Menu shortcuts. Close it and delete the extracted folder to remove it. There is no telemetry, advertising, or analytics. The default llama.cpp mode uses the selected GGUF through `127.0.0.1`. OpenAI-compatible mode sends prompts, chats, and attached images to the configured API endpoint and requires that endpoint to be reachable. API keys are protected with Windows DPAPI CurrentUser. Requests and generated Prompts are not normally written to the application log.
 
-After the required local data has been prepared, normal generation can run offline.
+The llama.cpp mode can run offline after its local data is ready. OpenAI-compatible mode requires a network connection to its configured endpoint.
 
 ## 15. Updating and Backing Up
 
@@ -178,13 +182,13 @@ Local Prompt Studio does not provide cloud synchronization, automatic Dataset me
 ## 16. Troubleshooting
 
 - **The application cannot write settings**: extract the ZIP to a folder your account can write to, such as a user-owned folder. Do not run from inside the ZIP.
-- **No model is configured**: choose an existing GGUF in Settings. The model is referenced, not copied.
+- **No model is configured**: choose an existing GGUF in Settings, or select OpenAI-compatible API and enter its Base URL and model name.
 - **H3 Skill is missing**: for MiniMax H3 only, use the official Skill download while online. Other Profiles do not require it.
 - **No Vulkan device is detected**: update/check the GPU driver, or switch to CPU. The app trusts llama.cpp device detection.
 - **Context is insufficient**: use 8192 or, when memory permits, 16384. Reduce input if necessary.
 - **RAM is insufficient**: close other software, lower Context Size, or choose a smaller GGUF.
 - **Generation is slow**: CPU generation can take several minutes; the maximum wait is 300 seconds.
-- **Cancel is still finishing**: wait a few seconds while the owned server stops. If needed, close the application; it shuts down only its own server.
+- **Cancel is still finishing**: wait while the active server request stops. Closing the application stops only its own llama-server process.
 - **ComfyUI connection fails**: check that ComfyUI is running, the Bridge is installed, the browser page was reloaded, and the URL is correct.
 - **No ComfyUI target**: right-click the target node and select the STRING widget again through MMH3 Prompt Bridge.
 

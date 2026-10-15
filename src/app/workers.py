@@ -21,6 +21,10 @@ from core.llama_manager import (
     LlamaError,
     LlamaServerManager,
 )
+from core.openai_compatible import (
+    LLM_PROVIDER_OPENAI_COMPATIBLE,
+    OpenAICompatibleClient,
+)
 from core.model_manager import validate_model
 from core.prompt_engine import PromptEngine, PromptSettings
 from core.prompt_translation import (
@@ -36,6 +40,63 @@ from core.renderers import (
 _LOGGER = logging.getLogger(__name__)
 GENERATION_CANCELLED = "GENERATION_CANCELLED"
 GENERATION_UNKNOWN_ERROR = "GENERATION_UNKNOWN_ERROR"
+
+
+def generate_with_provider(
+    server: LlamaServerManager,
+    config: AppConfig,
+    payload: dict[str, Any],
+    *,
+    timeout: float = DEFAULT_GENERATION_TIMEOUT_SECONDS,
+) -> str:
+    if config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE:
+        client = OpenAICompatibleClient(
+            config.openai_base_url,
+            config.openai_model,
+            config.openai_api_key,
+        )
+        set_external_client = getattr(server, "set_external_client", None)
+        if callable(set_external_client):
+            set_external_client(client)
+        try:
+            if getattr(server, "is_owned_server_running", False):
+                stop_server = getattr(server, "stop", None)
+                if callable(stop_server):
+                    stop_server()
+            return client.chat_completion(payload, timeout=timeout)
+        finally:
+            if callable(set_external_client):
+                set_external_client(None)
+    return server.generate(payload, timeout=timeout)
+
+
+class OpenAIConnectionTestThread(QThread):
+    """Test a configured compatible endpoint without sending chat content."""
+
+    succeeded = Signal()
+    failed = Signal(str)
+
+    def __init__(self, base_url: str, model: str, api_key: str, parent=None) -> None:
+        super().__init__(parent)
+        self.base_url = base_url
+        self.model = model
+        self.api_key = api_key
+
+    def run(self) -> None:
+        if self.isInterruptionRequested():
+            return
+        try:
+            OpenAICompatibleClient(
+                self.base_url,
+                self.model or "connection-test",
+                self.api_key,
+            ).test_connection()
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc) or "Connection failed.")
+        else:
+            if not self.isInterruptionRequested():
+                self.succeeded.emit()
 
 
 def generation_error_message(exc: Exception) -> str:
@@ -179,7 +240,11 @@ class GenerationThread(QThread):
         try:
             self.status_changed.emit("status.preparing_profile")
             payload = self.engine.request_payload(self.request_text, self.settings)
-            if not self.mock_mode:
+            use_openai = (
+                not self.mock_mode
+                and self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+            )
+            if not self.mock_mode and not use_openai:
                 self.status_changed.emit("status.preparing_model")
                 model = validate_model(self.config.model_path)
                 # Always submit the desired launch signature. The manager reuses an
@@ -194,11 +259,22 @@ class GenerationThread(QThread):
                     gpu_layers=self.config.gpu_layers,
                     status_callback=self.status_changed.emit,
                 )
-            if not self.mock_mode:
+            if not self.mock_mode and not use_openai:
                 self.status_changed.emit("status.preflight")
                 self.server.preflight_context(payload, self.config.context_size)
             self.status_changed.emit("status.generating")
-            output = self.server.generate(payload, timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS)
+            if self.mock_mode:
+                output = self.server.generate(
+                    payload,
+                    timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                )
+            else:
+                output = generate_with_provider(
+                    self.server,
+                    self.config,
+                    payload,
+                    timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                )
             if not self.isInterruptionRequested():
                 rendered = self.engine.finalize_output(
                     self.request_text,
@@ -261,7 +337,11 @@ class TranslationThread(QThread):
                 protected_terms=self.protected_terms,
                 structure_protection=self.structure_protection,
             )
-            if not self.mock_mode:
+            use_openai = (
+                not self.mock_mode
+                and self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+            )
+            if not self.mock_mode and not use_openai:
                 self.status_changed.emit("translation.status.preparing_model")
                 model = validate_model(self.config.model_path)
                 self.server.start(
@@ -276,10 +356,18 @@ class TranslationThread(QThread):
                 self.status_changed.emit("translation.status.preflight")
                 self.server.preflight_context(request.payload, self.config.context_size)
             self.status_changed.emit("translation.status.translating")
-            generated = self.server.generate(
-                request.payload,
-                timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
-            )
+            if self.mock_mode:
+                generated = self.server.generate(
+                    request.payload,
+                    timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                )
+            else:
+                generated = generate_with_provider(
+                    self.server,
+                    self.config,
+                    request.payload,
+                    timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                )
             if not self.isInterruptionRequested():
                 translated = self.service.finalize_response(
                     generated,
@@ -325,6 +413,10 @@ class ChatThread(QThread):
         self.mock_mode = mock_mode
 
     def run(self) -> None:
+        use_openai = (
+            not self.mock_mode
+            and self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+        )
         requires_multimodal = any(
             message.get("image") is not None for message in self.conversation
         )
@@ -336,7 +428,7 @@ class ChatThread(QThread):
         )
         try:
             payload = self.engine.request_payload(self.conversation)
-            if not self.mock_mode:
+            if not self.mock_mode and not use_openai:
                 self.status_changed.emit(
                     "chat.status.loading_multimodal"
                     if requires_multimodal
@@ -373,12 +465,20 @@ class ChatThread(QThread):
                 if requires_multimodal
                 else "chat.status.generating"
             )
-            generated = self.server.generate(
-                payload,
-                timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
-            )
+            if self.mock_mode:
+                generated = self.server.generate(
+                    payload,
+                    timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                )
+            else:
+                generated = generate_with_provider(
+                    self.server,
+                    self.config,
+                    payload,
+                    timeout=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+                )
             if not self.isInterruptionRequested():
-                if requires_multimodal and mmproj_path:
+                if requires_multimodal and mmproj_path and not use_openai:
                     self._mark_multimodal_state(
                         chat_model_path, mmproj_path, "available"
                     )
@@ -390,6 +490,8 @@ class ChatThread(QThread):
             if not self.isInterruptionRequested():
                 if exc.error_type == "exceed_context_size_error":
                     self.error_occurred.emit("CHAT_CONTEXT_OVERFLOW")
+                elif requires_multimodal and use_openai:
+                    self.error_occurred.emit(str(exc))
                 elif requires_multimodal and self._is_image_unsupported(exc):
                     self._mark_multimodal_state(
                         chat_model_path, mmproj_path, "unsupported"
@@ -398,7 +500,11 @@ class ChatThread(QThread):
                 elif requires_multimodal and self._is_image_decode_error(exc):
                     self.error_occurred.emit("CHAT_IMAGE_DECODE_FAILED")
                 elif requires_multimodal:
-                    self.error_occurred.emit("CHAT_IMAGE_REQUEST_FAILED")
+                    self.error_occurred.emit(
+                        str(exc)
+                        if use_openai
+                        else "CHAT_IMAGE_REQUEST_FAILED"
+                    )
                 else:
                     self.error_occurred.emit(str(exc))
         except Exception as exc:
@@ -407,7 +513,11 @@ class ChatThread(QThread):
             elif str(exc) == "CHAT_MMPROJ_LOAD_FAILED":
                 self.error_occurred.emit("CHAT_MMPROJ_LOAD_FAILED")
             elif requires_multimodal:
-                self.error_occurred.emit("CHAT_IMAGE_REQUEST_FAILED")
+                self.error_occurred.emit(
+                    str(exc)
+                    if use_openai
+                    else "CHAT_IMAGE_REQUEST_FAILED"
+                )
             else:
                 self.error_occurred.emit(str(exc) or "CHAT_UNKNOWN_ERROR")
 

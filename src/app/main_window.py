@@ -40,13 +40,24 @@ from core.comfyui_bridge import ComfyUIBridgeError, ComfyUIBridgeService
 from core.chat_engine import ChatEngine
 from core.chat_attachments import ChatImageAttachment, ChatImageError
 from core.chat_renderers import PromptTransferRenderer, ReferenceImageRenderer
-from core.config_manager import ConfigManager
+from core.comfyui_credentials import (
+    CredentialStoreError,
+    OpenAICompatibleCredentialStore,
+)
+from core.config_manager import (
+    ConfigManager,
+    LLM_PROVIDER_OPENAI_COMPATIBLE,
+)
 from core.history_manager import HistoryManager
 from core.inference_backends import BACKEND_VULKAN, backend_spec
 from core.llama_manager import LlamaServerManager
 from core.literal_content import parse_literal_content
 from core.localization import Localization, locale_matches_language
 from core.model_manager import inspect_model
+from core.openai_compatible import (
+    OpenAICompatibleClient,
+    normalize_openai_base_url,
+)
 from core.profile_loader import ProfileLoader
 from core.profile_models import LoadedProfile
 from core.prompt_engine import (
@@ -315,7 +326,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.project_root = project_root
         self.config_manager = config_manager
-        self.config = config_manager.load()
+        self.openai_credentials = OpenAICompatibleCredentialStore(
+            config_manager.data_dir
+        )
+        self.config = self._load_runtime_config()
         self.localization = localization or Localization(
             project_root / "locales", self.config.ui_locale
         )
@@ -396,6 +410,16 @@ class MainWindow(QMainWindow):
         self.memory_timer.setInterval(2500)
         self.memory_timer.timeout.connect(self._refresh_memory_display)
         self.memory_timer.start()
+
+    def _load_runtime_config(self):
+        config = self.config_manager.load()
+        if config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE:
+            try:
+                base_url = normalize_openai_base_url(config.openai_base_url)
+                config.openai_api_key = self.openai_credentials.load(base_url)
+            except (CredentialStoreError, ValueError):
+                config.openai_api_key = ""
+        return config
 
     def _build_ui(self) -> None:
         toolbar = QToolBar("Main")
@@ -1290,7 +1314,7 @@ class MainWindow(QMainWindow):
     def _persist_profile_selection(self) -> None:
         if self.profile is None:
             return
-        config = self.config_manager.load()
+        config = self._load_runtime_config()
         config.selected_profile = self.profile.manifest.id
         config.selected_variant = str(
             self.profile_variant.currentData() or self.profile.manifest.default_variant
@@ -1306,7 +1330,7 @@ class MainWindow(QMainWindow):
             )
 
     def _persist_auto_quality_tags(self, enabled: bool) -> None:
-        config = self.config_manager.load()
+        config = self._load_runtime_config()
         config.auto_quality_tags = enabled
         try:
             self.config_manager.save(config)
@@ -1578,8 +1602,10 @@ class MainWindow(QMainWindow):
             self._attach_chat_image(path)
 
     def _chat_image_attachment_allowed(self) -> bool:
-        self.config = self.config_manager.load()
+        self.config = self._load_runtime_config()
         self._update_chat_model_status()
+        if self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE:
+            return True
         model_path = self.config.effective_chat_model_path().strip()
         mmproj_path = self.config.mmproj_for_model(model_path) if model_path else ""
         if not mmproj_path:
@@ -1666,7 +1692,7 @@ class MainWindow(QMainWindow):
         message = text.strip()
         if not message and attachment is None:
             return
-        self.config = self.config_manager.load()
+        self.config = self._load_runtime_config()
         self._update_chat_model_status()
         user_message: dict[str, Any] = {"role": "user", "content": message}
         if attachment is not None:
@@ -1710,7 +1736,7 @@ class MainWindow(QMainWindow):
             or self._translation_active
         ):
             return
-        self.config = self.config_manager.load()
+        self.config = self._load_runtime_config()
         self._chat_analysis_type = "prompt_transfer"
         self._chat_retain_attachment = True
         self.chat_worker = ChatThread(
@@ -1884,7 +1910,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self.translation_dialog is None:
             return
-        self.config = self.config_manager.load()
+        self.config = self._load_runtime_config()
         self.translation_dialog.mark_translating(revision)
         self.translation_worker = TranslationThread(
             service=self.translation_service,
@@ -2027,6 +2053,13 @@ class MainWindow(QMainWindow):
     def _update_chat_model_status(self) -> None:
         if not hasattr(self, "chat_page"):
             return
+        if self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE:
+            self.chat_page.set_model_status(
+                model_name=self.config.openai_model,
+                model_path=self.config.openai_base_url,
+                image_state="api",
+            )
+            return
         model_path = self.config.effective_chat_model_path().strip()
         model_name = Path(model_path).name if model_path else ""
         mmproj_path = self.config.mmproj_for_model(model_path) if model_path else ""
@@ -2094,7 +2127,7 @@ class MainWindow(QMainWindow):
         if not text:
             self._update_send_button_state()
             return
-        config = self.config_manager.load()
+        config = self._load_runtime_config()
         try:
             service = self._bridge_service_factory(config.comfyui_url)
         except ComfyUIBridgeError as exc:
@@ -2164,15 +2197,20 @@ class MainWindow(QMainWindow):
             return
         if self.worker is not None and self.worker.isRunning():
             return
-        # Always sample on the button press. The timer value is informational only.
-        self._refresh_memory_display()
+        self.config = self._load_runtime_config()
+        use_openai = (
+            not self.mock_mode
+            and self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+        )
+        # Always sample on the button press when using a local model.
+        if not use_openai:
+            self._refresh_memory_display()
         request = self.request_text.toPlainText().strip()
         if not request:
             QMessageBox.information(
                 self, self.tr("input.request"), self.tr("input.required")
             )
             return
-        self.config = self.config_manager.load()
         self._refresh_readiness()
         if self.mock_mode and self.config.skill_location == "":
             self.config.skill_location = str(self.skill_manager.location)
@@ -2188,7 +2226,21 @@ class MainWindow(QMainWindow):
                 self.tr("error.h3_skill_required"),
             )
             return
-        if not self.mock_mode and not self.server.runtime_available(self.config.inference_backend):
+        if use_openai:
+            try:
+                OpenAICompatibleClient(
+                    self.config.openai_base_url,
+                    self.config.openai_model,
+                    self.config.openai_api_key,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, self.tr("settings.openai.title"), str(exc))
+                return
+        if (
+            not use_openai
+            and not self.mock_mode
+            and not self.server.runtime_available(self.config.inference_backend)
+        ):
             QMessageBox.warning(
                 self,
                 self.tr("error.runtime_missing_title"),
@@ -2198,7 +2250,7 @@ class MainWindow(QMainWindow):
                 ),
             )
             return
-        if not self.mock_mode and self.config.inference_backend == BACKEND_VULKAN:
+        if not use_openai and not self.mock_mode and self.config.inference_backend == BACKEND_VULKAN:
             devices = self.server.detect_vulkan_devices()
             identifiers = {device.identifier for device in devices}
             if not devices or (
@@ -2210,11 +2262,12 @@ class MainWindow(QMainWindow):
                     self.tr("error.vulkan_not_detected"),
                 )
                 return
-        # Take a second fresh sample immediately before making the safety decision.
-        warning_memory = get_system_memory()
-        self._refresh_memory_display(warning_memory)
+        # Take a second fresh sample immediately before making the local memory decision.
+        warning_memory = get_system_memory() if not use_openai else None
+        if warning_memory is not None:
+            self._refresh_memory_display(warning_memory)
         assessment = self._memory_assessment(warning_memory)
-        warnings = self._memory_warnings(assessment)
+        warnings = self._memory_warnings(assessment) if not use_openai else []
         if warnings and assessment is not None:
             answer = QMessageBox.warning(
                 self,
@@ -2365,6 +2418,37 @@ class MainWindow(QMainWindow):
         self._refresh_memory_display()
 
     def _refresh_readiness(self) -> None:
+        if (
+            not self.mock_mode
+            and self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+        ):
+            model_name = self.config.openai_model or self.tr("readiness.not_set")
+            try:
+                normalize_openai_base_url(self.config.openai_base_url)
+                configured = bool(self.config.openai_model)
+            except ValueError:
+                configured = False
+            skill_valid = (
+                not self.profile
+                or not self.profile.requires_dependency("prompt_skill")
+                or self.skill_manager.status().valid
+            )
+            segments = [
+                f"{self.tr('readiness.model')}: {model_name}",
+                f"{self.tr('readiness.backend')}: {self.tr('settings.openai.provider_name')}",
+                f"{self.tr('readiness.runtime')}: {'Ready' if configured else 'Missing settings'}",
+            ]
+            if self.profile and self.profile.requires_dependency("prompt_skill"):
+                segments.append(
+                    f"{self.tr('readiness.skill')}: "
+                    f"{self.tr('readiness.installed' if skill_valid else 'readiness.not_installed')}"
+                )
+            self.readiness.setText(" / ".join(segments))
+            self._system_summary_model = model_name
+            self._system_summary_backend = self.tr("settings.openai.provider_name")
+            self._system_readiness_warning = not configured or not skill_valid
+            self._update_system_summary()
+            return
         readiness_warning = False
         if self.config.model_path:
             info = inspect_model(self.config.model_path)
@@ -2434,7 +2518,10 @@ class MainWindow(QMainWindow):
         self._update_system_summary()
 
     def _memory_assessment(self, memory: MemoryInfo | None) -> MemoryAssessment | None:
-        if not self.config.model_path:
+        if (
+            not self.config.model_path
+            or self.config.llm_provider == LLM_PROVIDER_OPENAI_COMPATIBLE
+        ):
             return None
         model = inspect_model(self.config.model_path)
         if not model.exists:
@@ -2543,7 +2630,7 @@ class MainWindow(QMainWindow):
             localization=self.localization,
             focus_chat_model=focus_chat_model,
         ).exec():
-            self.config = self.config_manager.load()
+            self.config = self._load_runtime_config()
             self.skill_manager = SkillManager(
                 self.config.skill_location
                 or self.config_manager.data_dir / "skills" / "h3-prompt-writing"

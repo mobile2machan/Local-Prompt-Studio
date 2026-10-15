@@ -287,6 +287,8 @@ class LlamaServerManager:
         self._launch_signature: tuple[Any, ...] | None = None
         self.active_model_spec: LlamaModelSpec | None = None
         self._cancelled = threading.Event()
+        self._external_client_lock = threading.Lock()
+        self._active_external_client: Any | None = None
         self.active_backend = BACKEND_CPU
         self.active_device = ""
         self.last_model_load_seconds: float | None = None
@@ -605,8 +607,17 @@ class LlamaServerManager:
 
     def cancel(self) -> None:
         self._cancelled.set()
+        with self._external_client_lock:
+            external_client = self._active_external_client
+        cancel_external = getattr(external_client, "cancel", None)
+        if callable(cancel_external):
+            cancel_external()
         if self.process is not None:
             self.stop()
+
+    def set_external_client(self, client: Any | None) -> None:
+        with self._external_client_lock:
+            self._active_external_client = client
 
     def stop(self) -> None:
         process, self.process = self.process, None
