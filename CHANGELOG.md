@@ -8,6 +8,10 @@
 - Added LAN API endpoint, model, optional API key, connection test, and first-run setup without a local GGUF.
 - Protected saved API keys with Windows DPAPI and documented that prompts, chats, and attached images are sent to the selected endpoint.
 
+### Fixed
+
+- Disabled template reasoning when supported by OpenAI-compatible servers, preventing reasoning models from consuming the full output limit without returning an answer.
+
 ## 3.1.1 — 2026-08-29
 
 Multilingual UI and prompt translation update.

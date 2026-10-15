@@ -157,7 +157,21 @@ class OpenAICompatibleClient:
         timeout: float = DEFAULT_GENERATION_TIMEOUT_SECONDS,
     ) -> str:
         started_at = time.monotonic()
-        data = self._request("chat/completions", payload=payload, timeout=timeout)
+        request_payload = dict(payload)
+        request_payload["chat_template_kwargs"] = {"enable_thinking": False}
+        try:
+            data = self._request(
+                "chat/completions",
+                payload=request_payload,
+                timeout=timeout,
+            )
+        except LlamaConnectionError as exc:
+            if (
+                exc.status not in {400, 422}
+                or "chat_template_kwargs" not in str(exc).casefold()
+            ):
+                raise
+            data = self._request("chat/completions", payload=payload, timeout=timeout)
         try:
             choice = data["choices"][0]
             message = choice["message"]
@@ -171,6 +185,16 @@ class OpenAICompatibleClient:
         except (KeyError, IndexError, TypeError) as exc:
             raise LlamaError("The OpenAI-compatible server returned an invalid chat response.") from exc
         if not isinstance(content, str) or not content.strip():
+            if (
+                isinstance(message, dict)
+                and isinstance(message.get("reasoning_content"), str)
+                and isinstance(choice, dict)
+                and choice.get("finish_reason") == "length"
+            ):
+                raise LlamaError(
+                    "The server used the output token limit for reasoning and returned no final response. "
+                    "This server may not support chat_template_kwargs; disable reasoning in its server settings."
+                )
             raise LlamaError("The OpenAI-compatible server returned an empty response.")
         usage = data.get("usage")
         self.last_response_metrics = {
